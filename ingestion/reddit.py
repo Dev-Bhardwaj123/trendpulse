@@ -21,10 +21,11 @@ class Reddit(Source):
                 continue
             for child in r.json().get("data", {}).get("children", []):
                 d = child["data"]
+                ts = datetime.fromtimestamp(d.get("created_utc", 0), tz=timezone.utc)
                 out.append(Post(
                     source=self.name, external_id=d["id"],
                     title=d.get("title", ""), text=d.get("selftext", ""),
                     url="https://www.reddit.com" + d.get("permalink", ""),
                     author=d.get("author", ""), score=int(d.get("score", 0)),
-                    created_at=datetime.fromtimestamp(d.get("created_utc", 0), tz=timezone.utc)))
+                    created_at=ts.isoformat()))
         return out

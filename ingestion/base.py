@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 import psycopg
 
@@ -15,11 +15,16 @@ class Post:
     url: str
     author: str
     score: int
-    created_at: datetime
+    created_at: str  # ISO-8601 string (JSON-transportable through Kafka)
 
-    def as_row(self):
-        return (self.source, self.external_id, self.title, self.text,
-                self.url, self.author, self.score, self.created_at)
+    def to_json(self) -> str:
+        return json.dumps(asdict(self))
+
+    @classmethod
+    def from_json(cls, raw):
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode()
+        return cls(**json.loads(raw))
 
 
 class Source:
@@ -33,16 +38,7 @@ def get_conn():
     return psycopg.connect(dsn)
 
 
-def _publish(event):
-    try:
-        import redis
-        r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
-        r.publish("newposts", json.dumps(event))
-    except Exception as e:
-        print(f"[pubsub] skipped: {e}")
-
-
-def save(posts):
+def upsert(posts):
     if not posts:
         return 0
     sql = """
@@ -53,11 +49,18 @@ def save(posts):
     """
     now = datetime.now(timezone.utc)
     n = 0
-    sources = set()
     with get_conn() as conn, conn.cursor() as cur:
         for p in posts:
-            cur.execute(sql, (*p.as_row(), now))
+            cur.execute(sql, (p.source, p.external_id, p.title, p.text,
+                              p.url, p.author, p.score, p.created_at, now))
             n += cur.rowcount
-            sources.add(p.source)
-    _publish({"event": "new_posts", "count": n, "sources": sorted(sources)})
     return n
+
+
+def publish_event(event):
+    try:
+        import redis
+        redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379")).publish(
+            "newposts", json.dumps(event))
+    except Exception as e:
+        print(f"[pubsub] skipped: {e}")
