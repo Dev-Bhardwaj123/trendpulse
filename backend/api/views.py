@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.db import connection
 from django.db.models import Count
 from rest_framework import viewsets, mixins
 from rest_framework.decorators import api_view
@@ -36,3 +37,20 @@ def trending(request):
 def sources(request):
     data = Post.objects.values("source").annotate(count=Count("id")).order_by("-count")
     return Response(list(data))
+
+
+@api_view(["GET"])
+def sentiment_trends(request):
+    """Spark-produced trends with average sentiment (from spark_trends table)."""
+    limit = int(request.query_params.get("limit", 15))
+    rows = []
+    try:
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT term, count, avg_sentiment FROM spark_trends "
+                "ORDER BY count DESC LIMIT %s", [limit])
+            rows = [{"term": r[0], "count": int(r[1]), "avg_sentiment": float(r[2])}
+                    for r in cur.fetchall()]
+    except Exception:
+        rows = []  # table not created until the Spark job has run
+    return Response(rows)

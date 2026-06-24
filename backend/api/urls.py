@@ -3,6 +3,9 @@ from rest_framework.routers import DefaultRouter
 from . import views
 router = DefaultRouter()
 router.register("posts", views.PostViewSet, basename="post")
-urlpatterns = [path("", include(router.urls)),
-               path("trending/", views.trending),
-               path("sources/", views.sources)]
+urlpatterns = [
+    path("", include(router.urls)),
+    path("trending/", views.trending),
+    path("sources/", views.sources),
+    path("sentiment/", views.sentiment_trends),
+]

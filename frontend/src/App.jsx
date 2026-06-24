@@ -3,8 +3,15 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recha
 
 const API = import.meta.env.VITE_API_BASE || "/api";
 
+function sentColor(s) {
+  if (s > 0.05) return "#4ade80";
+  if (s < -0.05) return "#f87171";
+  return "#8891b0";
+}
+
 export default function App() {
   const [trends, setTrends] = useState([]);
+  const [sentiment, setSentiment] = useState([]);
   const [posts, setPosts] = useState([]);
   const [live, setLive] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -12,6 +19,7 @@ export default function App() {
 
   const load = () => {
     fetch(`${API}/trending/?limit=12`).then((r) => r.json()).then(setTrends).catch(() => {});
+    fetch(`${API}/sentiment/?limit=12`).then((r) => r.json()).then(setSentiment).catch(() => {});
     fetch(`${API}/posts/`).then((r) => r.json()).then((d) => setPosts(d.results || [])).catch(() => {});
   };
 
@@ -32,6 +40,8 @@ export default function App() {
     return () => ws.close();
   }, []);
 
+  const maxC = Math.max(1, ...sentiment.map((d) => d.count));
+
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
       <h1 style={{ fontWeight: 800 }}>
@@ -42,10 +52,27 @@ export default function App() {
         </span>
         {flash && <span style={{ marginLeft: 10, fontSize: 13, color: "#facc15" }}>new posts received</span>}
       </h1>
-      <section style={{ background: "#141a33", borderRadius: 16, padding: 16, marginBottom: 24,
-        transition: "outline .3s", outline: flash ? "2px solid #facc15" : "2px solid transparent" }}>
+
+      <section style={{ background: "#141a33", borderRadius: 16, padding: 16, marginBottom: 24 }}>
+        <h2 style={{ marginTop: 0 }}>Sentiment by trend <span style={{ fontSize: 13, opacity: 0.6 }}>(Apache Spark + VADER)</span></h2>
+        {sentiment.length === 0 && <p style={{ opacity: 0.6 }}>Run the Spark job to populate sentiment.</p>}
+        {sentiment.map((d) => (
+          <div key={d.term} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+            <div style={{ width: 110, textAlign: "right", fontSize: 13 }}>{d.term}</div>
+            <div style={{ flex: 1, background: "#0b1020", borderRadius: 6 }}>
+              <div style={{ width: `${(d.count / maxC) * 100}%`, background: sentColor(d.avg_sentiment),
+                height: 18, borderRadius: 6 }} />
+            </div>
+            <div style={{ width: 90, fontSize: 12, color: sentColor(d.avg_sentiment) }}>
+              {d.avg_sentiment > 0 ? "+" : ""}{d.avg_sentiment}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section style={{ background: "#141a33", borderRadius: 16, padding: 16, marginBottom: 24 }}>
         <h2 style={{ marginTop: 0 }}>Trending topics (24h)</h2>
-        <div style={{ height: 320 }}>
+        <div style={{ height: 300 }}>
           <ResponsiveContainer>
             <BarChart data={trends} layout="vertical" margin={{ left: 40 }}>
               <XAxis type="number" stroke="#8891b0" allowDecimals={false} />
@@ -56,6 +83,7 @@ export default function App() {
           </ResponsiveContainer>
         </div>
       </section>
+
       <section style={{ background: "#141a33", borderRadius: 16, padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Latest posts</h2>
         {posts.map((p) => (
