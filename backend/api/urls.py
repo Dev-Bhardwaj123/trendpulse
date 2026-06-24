@@ -8,4 +8,5 @@ urlpatterns = [
     path("trending/", views.trending),
     path("sources/", views.sources),
     path("sentiment/", views.sentiment_trends),
+    path("chat/", views.chat),
 ]

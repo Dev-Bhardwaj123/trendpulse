@@ -9,3 +9,4 @@ channels==4.1.0
 channels-redis==4.2.1
 daphne==4.1.2
 redis==5.2.1
+google-genai==1.9.0

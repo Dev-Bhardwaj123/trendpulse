@@ -1,3 +1,177 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /workspaces/trendpulse
+echo ">> Applying Phase 5 (agentic AI chatbot - Google Gemini) ..."
+
+cat > backend/requirements.txt <<'EOF'
+Django==5.1.4
+djangorestframework==3.15.2
+django-cors-headers==4.6.0
+dj-database-url==2.3.0
+psycopg[binary]==3.2.3
+gunicorn==23.0.0
+python-dotenv==1.0.1
+channels==4.1.0
+channels-redis==4.2.1
+daphne==4.1.2
+redis==5.2.1
+google-genai==1.9.0
+EOF
+
+cat > backend/api/agent.py <<'EOF'
+"""Agentic AI assistant powered by Google Gemini with tool-calling.
+
+The model decides which tools to invoke to answer questions over TrendPulse's
+own data (trends, Spark sentiment, posts, sources), then synthesises a reply.
+"""
+import os
+from django.db import connection
+from django.db.models import Count
+from .models import Post
+from .trending import top_trends
+
+
+def get_trending(limit: int = 10) -> list:
+    """Get the top trending terms by frequency across all sources in the last 24 hours."""
+    return top_trends(limit=limit)
+
+
+def get_sentiment(limit: int = 10) -> list:
+    """Get trending terms with average sentiment from -1 (very negative) to +1 (very positive), computed by the Apache Spark job."""
+    rows = []
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT term, count, avg_sentiment FROM spark_trends "
+                        "ORDER BY count DESC LIMIT %s", [limit])
+            rows = [{"term": r[0], "count": int(r[1]), "avg_sentiment": float(r[2])}
+                    for r in cur.fetchall()]
+    except Exception:
+        pass
+    return rows
+
+
+def search_posts(query: str, limit: int = 8) -> list:
+    """Search recent post titles for a keyword. Returns source, title and url for matches."""
+    qs = Post.objects.filter(title__icontains=query).order_by("-created_at")[:limit]
+    return [{"source": p.source, "title": p.title, "url": p.url} for p in qs]
+
+
+def get_sources() -> list:
+    """Get each data source and how many posts have been collected from it."""
+    return list(Post.objects.values("source").annotate(count=Count("id")).order_by("-count"))
+
+
+SYSTEM = (
+    "You are TrendPulse's analytics assistant. Answer questions about social and "
+    "news trends using ONLY the provided tools to fetch real data. Be concise "
+    "(2-4 sentences). Mention the actual terms, counts or sentiment values you "
+    "found, and which source(s) they came from. If sentiment data is empty, say "
+    "the Spark job needs to be run."
+)
+
+
+def run_agent(message: str) -> dict:
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return {"reply": "Gemini API key not configured. Add GEMINI_API_KEY to .env and restart the server.",
+                "ok": False}
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=key)
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    config = types.GenerateContentConfig(
+        tools=[get_trending, get_sentiment, search_posts, get_sources],
+        system_instruction=SYSTEM,
+    )
+    resp = client.models.generate_content(model=model, contents=message, config=config)
+    return {"reply": (resp.text or "(no response)"), "ok": True}
+EOF
+
+cat > backend/api/views.py <<'EOF'
+from django.core.cache import cache
+from django.db import connection
+from django.db.models import Count
+from rest_framework import viewsets, mixins
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Post
+from .serializers import PostSerializer
+from .trending import top_trends
+from .agent import run_agent
+
+
+class PostViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    queryset = Post.objects.all()
+    serializer_class = PostSerializer
+    def get_queryset(self):
+        qs = super().get_queryset()
+        source = self.request.query_params.get("source")
+        return qs.filter(source=source) if source else qs
+
+
+@api_view(["GET"])
+def trending(request):
+    hours = int(request.query_params.get("hours", 24))
+    limit = int(request.query_params.get("limit", 20))
+    key = f"trending:{hours}:{limit}"
+    data = cache.get(key)
+    cached = data is not None
+    if not cached:
+        data = top_trends(hours=hours, limit=limit)
+        cache.set(key, data, 60)
+    resp = Response(data)
+    resp["X-Cache"] = "HIT" if cached else "MISS"
+    return resp
+
+
+@api_view(["GET"])
+def sources(request):
+    data = Post.objects.values("source").annotate(count=Count("id")).order_by("-count")
+    return Response(list(data))
+
+
+@api_view(["GET"])
+def sentiment_trends(request):
+    limit = int(request.query_params.get("limit", 15))
+    rows = []
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT term, count, avg_sentiment FROM spark_trends "
+                        "ORDER BY count DESC LIMIT %s", [limit])
+            rows = [{"term": r[0], "count": int(r[1]), "avg_sentiment": float(r[2])}
+                    for r in cur.fetchall()]
+    except Exception:
+        rows = []
+    return Response(rows)
+
+
+@api_view(["POST"])
+def chat(request):
+    msg = (request.data.get("message") or "").strip()
+    if not msg:
+        return Response({"reply": "Ask me about trending topics or sentiment.", "ok": True})
+    try:
+        return Response(run_agent(msg))
+    except Exception as e:
+        return Response({"reply": f"Agent error: {e}", "ok": False})
+EOF
+
+cat > backend/api/urls.py <<'EOF'
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
+router = DefaultRouter()
+router.register("posts", views.PostViewSet, basename="post")
+urlpatterns = [
+    path("", include(router.urls)),
+    path("trending/", views.trending),
+    path("sources/", views.sources),
+    path("sentiment/", views.sentiment_trends),
+    path("chat/", views.chat),
+]
+EOF
+
+cat > frontend/src/App.jsx <<'EOF'
 import React, { useEffect, useState, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -148,3 +322,9 @@ export default function App() {
     </div>
   );
 }
+EOF
+
+grep -q GEMINI_API_KEY .env || printf 'GEMINI_API_KEY=\nGEMINI_MODEL=gemini-2.0-flash\n' >> .env
+grep -q GEMINI_API_KEY .env.example || printf 'GEMINI_API_KEY=\nGEMINI_MODEL=gemini-2.0-flash\n' >> .env.example
+
+echo ">> Phase 5 files written."

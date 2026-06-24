@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from .models import Post
 from .serializers import PostSerializer
 from .trending import top_trends
+from .agent import run_agent
 
 
 class PostViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -41,16 +42,25 @@ def sources(request):
 
 @api_view(["GET"])
 def sentiment_trends(request):
-    """Spark-produced trends with average sentiment (from spark_trends table)."""
     limit = int(request.query_params.get("limit", 15))
     rows = []
     try:
         with connection.cursor() as cur:
-            cur.execute(
-                "SELECT term, count, avg_sentiment FROM spark_trends "
-                "ORDER BY count DESC LIMIT %s", [limit])
+            cur.execute("SELECT term, count, avg_sentiment FROM spark_trends "
+                        "ORDER BY count DESC LIMIT %s", [limit])
             rows = [{"term": r[0], "count": int(r[1]), "avg_sentiment": float(r[2])}
                     for r in cur.fetchall()]
     except Exception:
-        rows = []  # table not created until the Spark job has run
+        rows = []
     return Response(rows)
+
+
+@api_view(["POST"])
+def chat(request):
+    msg = (request.data.get("message") or "").strip()
+    if not msg:
+        return Response({"reply": "Ask me about trending topics or sentiment.", "ok": True})
+    try:
+        return Response(run_agent(msg))
+    except Exception as e:
+        return Response({"reply": f"Agent error: {e}", "ok": False})
