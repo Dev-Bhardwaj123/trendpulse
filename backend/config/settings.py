@@ -9,11 +9,14 @@ load_dotenv(BASE_DIR.parent / ".env")
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "django.contrib.staticfiles",
+    "channels",
     "rest_framework",
     "corsheaders",
     "api",
@@ -26,9 +29,14 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates",
              "DIRS": [], "APP_DIRS": True, "OPTIONS": {"context_processors": []}}]
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {"default": dj_database_url.parse(
     os.environ.get("DATABASE_URL", "postgresql://trend:trend@localhost:5432/trendpulse"),
     conn_max_age=600)}
+CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer",
+                              "CONFIG": {"hosts": [REDIS_URL]}}}
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.redis.RedisCache",
+                      "LOCATION": REDIS_URL + "/1"}}
 CORS_ALLOW_ALL_ORIGINS = True
 REST_FRAMEWORK = {"DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
                   "PAGE_SIZE": 50}

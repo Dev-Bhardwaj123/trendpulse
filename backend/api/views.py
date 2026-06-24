@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.db.models import Count
 from rest_framework import viewsets, mixins
 from rest_framework.decorators import api_view
@@ -20,7 +21,15 @@ class PostViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 def trending(request):
     hours = int(request.query_params.get("hours", 24))
     limit = int(request.query_params.get("limit", 20))
-    return Response(top_trends(hours=hours, limit=limit))
+    key = f"trending:{hours}:{limit}"
+    data = cache.get(key)
+    cached = data is not None
+    if not cached:
+        data = top_trends(hours=hours, limit=limit)
+        cache.set(key, data, 60)
+    resp = Response(data)
+    resp["X-Cache"] = "HIT" if cached else "MISS"
+    return resp
 
 
 @api_view(["GET"])

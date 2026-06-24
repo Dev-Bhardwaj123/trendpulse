@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,6 +33,15 @@ def get_conn():
     return psycopg.connect(dsn)
 
 
+def _publish(event):
+    try:
+        import redis
+        r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
+        r.publish("newposts", json.dumps(event))
+    except Exception as e:
+        print(f"[pubsub] skipped: {e}")
+
+
 def save(posts):
     if not posts:
         return 0
@@ -43,8 +53,11 @@ def save(posts):
     """
     now = datetime.now(timezone.utc)
     n = 0
+    sources = set()
     with get_conn() as conn, conn.cursor() as cur:
         for p in posts:
             cur.execute(sql, (*p.as_row(), now))
             n += cur.rowcount
+            sources.add(p.source)
+    _publish({"event": "new_posts", "count": n, "sources": sorted(sources)})
     return n
