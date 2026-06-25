@@ -1,3 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /workspaces/trendpulse
+echo ">> Phase 6b: prod WebSocket host fix + Kafka-free direct ingest ..."
+
+cat > frontend/src/App.jsx <<'EOF'
 import React, { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -160,3 +166,67 @@ export default function App() {
     </div>
   );
 }
+EOF
+
+cat > ingestion/ingest_direct.py <<'EOF'
+"""Kafka-free ingest: fetch sources and upsert straight into Postgres.
+
+Used by the scheduled GitHub Action to refresh the deployed (Neon) database
+without needing a hosted Kafka. The full Kafka pipeline (runner.py + consumer.py)
+is the local/streaming path.
+"""
+from __future__ import annotations
+from dotenv import load_dotenv
+load_dotenv()
+from base import upsert, publish_event
+from hackernews import HackerNews
+from reddit import Reddit
+from bluesky import BlueskyFirehose
+
+
+def main():
+    sources = [HackerNews(limit=50), Reddit(limit=25), BlueskyFirehose(limit=120)]
+    total = 0
+    for s in sources:
+        try:
+            posts = s.fetch()
+            n = upsert(posts)
+            total += n
+            print(f"[{s.name}] fetched={len(posts)} upserted={n}")
+        except Exception as e:
+            print(f"[{s.name}] ERROR: {e}")
+    try:
+        publish_event({"event": "new_posts", "count": total})
+    except Exception:
+        pass
+    print(f"done. total upserted={total}")
+
+
+if __name__ == "__main__":
+    main()
+EOF
+
+cat > .github/workflows/refresh-data.yml <<'EOF'
+name: refresh-data
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 min
+  workflow_dispatch:
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r ingestion/requirements.txt
+      - name: Ingest fresh posts into the deployed database
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: python ingest_direct.py
+EOF
+
+echo ">> Phase 6b files written."

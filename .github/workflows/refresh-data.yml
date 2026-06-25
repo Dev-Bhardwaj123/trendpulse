@@ -12,16 +12,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r ingestion/requirements.txt
-      - name: Produce to Kafka then drain to Postgres
+      - name: Ingest fresh posts into the deployed database
         working-directory: ingestion
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
-          KAFKA_BOOTSTRAP: ${{ secrets.KAFKA_BOOTSTRAP }}
-          KAFKA_SECURITY_PROTOCOL: SASL_SSL
-          KAFKA_SASL_MECHANISM: SCRAM-SHA-256
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
-        run: |
-          python runner.py
-          timeout 60 python consumer.py || true
+        run: python ingest_direct.py
