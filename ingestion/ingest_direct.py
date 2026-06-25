@@ -16,6 +16,7 @@ URL_RE = re.compile(r"https?://\S+|www\.\S+|\b\w+\.(?:com|org|net|io|co)\b")
 HASH_RE = re.compile(r"#(\w{2,30})")
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z'+\-]{2,}")
 STOP = set("""
+zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion trillion dozen digit digits number numbers word words count
 the a an and or of to in for on with is are was were be been being it its as at by from this that
 these those there here you your we our they them their he she his her who which what when where why
 how all any both each more most other some such only own same so than too very can will just dont
