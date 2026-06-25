@@ -10,3 +10,4 @@ channels-redis==4.2.1
 daphne==4.1.2
 redis==5.2.1
 google-genai==1.9.0
+whitenoise==6.8.2

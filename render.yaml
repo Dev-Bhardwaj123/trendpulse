@@ -1,0 +1,30 @@
+# Render Blueprint. The web service runs on Render's free plan.
+# (Background workers / cron are paid on Render; on the free tier the Kafka
+# consumer + ingestion run via the scheduled GitHub Action in
+# .github/workflows/refresh-data.yml instead.)
+services:
+  - type: web
+    name: trendpulse-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: "./build.sh"
+    startCommand: "daphne -b 0.0.0.0 -p $PORT config.asgi:application"
+    healthCheckPath: /api/sources/
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: DB_SSL
+        value: "1"
+      - key: DATABASE_URL
+        sync: false   # paste Neon connection string
+      - key: REDIS_URL
+        sync: false   # paste Upstash rediss:// URL
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash-lite
