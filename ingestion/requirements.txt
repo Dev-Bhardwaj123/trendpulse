@@ -4,3 +4,4 @@ python-dotenv==1.0.1
 redis==5.2.1
 confluent-kafka==2.6.1
 websocket-client==1.8.0
+vaderSentiment==3.3.2
